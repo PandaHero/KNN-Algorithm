@@ -1,4 +1,4 @@
-import re
+import logging
 import time
 
 import requests
@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+import threading
 
 # 获取浏览器驱动
 browser = webdriver.Chrome()
@@ -24,20 +25,34 @@ headers = {"Accept-Encoding": "gzip, deflate, sdch, br",
 
 # 浏览器加载主页面并返回包含关键字商品的总页数
 def search():
+    '''
+    :return:
+        total_page_num:商品列表页数
+    '''
     browser.get("https://www.jd.com")
+    # 获取主页输入框
     editText = browser_wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#key")))
+    # 获取主页搜索按钮
     button = browser_wait.until(
         EC.element_to_be_clickable((By.CSS_SELECTOR, "#search > div > div.form > button > i")))
+    # 填写关键字
     editText.send_keys("红酒")
+    # 发送
     button.click()
+    # 商品列表页数
     total_page_num = browser_wait.until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "#J_bottomPage > span.p-skip > em:nth-child(1) > b"))).text
     return total_page_num
 
 
-# 传入页码，并返回商品列表
+# 传入页码，并返回商品列表url
 def next_page(page_num):
-    lists = []
+    '''
+    :param page_num: 翻页页码
+    :return:
+            "good_url": 商品url
+            "goods_price": 商品价格
+    '''
     print("正在翻第" + str(page_num) + "页")
     # 判断items(每一个宝贝)是否加载成功
     # browser_wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#ml-wrap .gl-warp .gl-item")))
@@ -45,85 +60,118 @@ def next_page(page_num):
     button = browser_wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#J_topPage > a.fp-next")))
     button.click()
     # 休息2秒获取下一个页面
-    time.sleep(2)
+    time.sleep(0.2)
     # 获取网页源代码
     html = browser.page_source
+    # 解析网页
     soup = BeautifulSoup(html, "lxml")
-    # print(soup)
+    # 获取上半部分的商品列表信息
     goodsList = soup.find("div", {"id": "J_goodsList"})
-    # print(type(goodsList))
     items = goodsList.find_all("li")
+    # 保存商品sku信息
     show_item = ""
     for item in items:
-        # print(type(item))
         data_sku = item["data-sku"]
         show_item = show_item + str(data_sku) + ","
+    # 商品sku切片
     show_items = show_item[:-2]
     # 剩下的30个商品item的url获取网页源码并解析
     url = "https://search.jd.com/s_new.php?keyword=%E7%BA%A2%E9%85%92&enc=utf-8&" + "page=" + str(
         int(2 * page_num)) + "&scrolling=y&show_items=" + str(show_items)
+    # 剩余商品发送请求并解析
     req = requests.get(url, headers=headers)
     obj_soup = BeautifulSoup(req.text, "lxml")
     list_1 = obj_soup.find_all("li", {"class": "gl-item"})
     lists = goodsList.find_all("li", {"class": "gl-item"})
     # 把剩下的30个商品items添加到lists列表中
     lists.extend(list_1)
+    # 列表保存商品的url和价格信息
     goods_info = []
     for goods in lists:
-        # goods_details = goods.find("div", {"class": "p-name p-name-type-2"})
         goods_price = goods.find("div", {"class": "p-price"})
         goods_url = goods.find("div", {"class": "p-img"})
-        goods_commit = goods.find("div", {"class": "p-commit"})
-        # details = goods_details.a["title"]
+        # 商品url处理
         url = goods_url.a["href"]
         if "https" in url:
             url = url
         else:
             url = "http:" + url
+        # 商品价格处理，处理掉空格,￥，换行符
         price = goods_price.get_text().replace("\n", "").replace("￥", "").replace(" ", "")
-        commit = goods_commit.get_text().replace("\n", "").replace("条评价", "")
-        if "万" in commit:
-            commits = float(re.search("\d", commit).group()) * 10000
-            # product = {"good_title": details, "good_url": url, "good_price": price, "good_commit": commits}
+        # 查看价格字符串中存在的“.”的个数，若大于1，则保存前一个价格
+        num = price.count(".")
+        if num > 1:
+            price = price[0:price.index(".") + 3]
         else:
-            commits = commit
-        product = {"good_url": url, "good_price": price, "good_commit": commits}
+            price = price
+        product = {"goods_url": url, "goods_price": price}
+        # 把商品信息添加到goods_info列表中
         goods_info.append(product)
-        # print(details, url, price, commits)
+    # 刷新界面，保证下一次能找到页面元素
+    browser.refresh()
     return goods_info
 
 
 # 解析每个商品url的信息，并返回商品详情页的数据：品牌、原产国、原料、产区等等
 def get_details_info(url):
+    '''
+    :param url: 商品的url
+    :return:
+    '''
+    print(url)
+    # 重复最大次数
+    max_try_num = 10
+    # 保存商品详情信息
     product_details_dic = {}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36"}
-    req = requests.get(url, headers=headers)
-    print(url)
-    if req.status_code == 200:
-        # req.encoding = "utf-8"
-        soup = BeautifulSoup(req.text, "lxml")
-        # 获取商品的详细信息
-        good_parameter = soup.find("div", {"class": "p-parameter"})
-        # parameter_brand = good_parameter.find("ul", {"id": "parameter-brand"}, {"class": "p-parameter-list"})
-        # brand = parameter_brand.find("li")["title"]
-        if good_parameter:
-            p_parameter_list = good_parameter.find("ul", {"class": "parameter2"})
-            print(p_parameter_list)
-            li_parameter_list = p_parameter_list.find_all("li")
-            # 把商品介绍的详情信息添加到product_details_info
-            for li_parameter in li_parameter_list:
-                li_split = str(li_parameter.get_text()).split("：")
-                product_details_dic[li_split[0]] = li_split[-1]
-            # 把商品的规格与包装信息添加到product_details_info
-            ptable = soup.find("div", {"class": "Ptable"})
-            if ptable:
-                ptable_dl = ptable.find("dl")
-                ptable_dt = ptable_dl.find_all("dt")
-                ptable_dd = ptable_dl.find_all("dd")
-                for i in range(len(ptable_dt)):
-                    product_details_dic[ptable_dt[i].get_text()] = ptable_dd[i].get_text()
-    return product_details_dic
+    # 遍历，若连接失败，则进行下一次请求
+    for tries in range(max_try_num):
+        try:
+            req = requests.get(url, headers=headers)
+            if req.status_code == 200:
+                soup = BeautifulSoup(req.text, "lxml")
+                # 获取商品名称,经营方式
+                sku_name = soup.find("div", {"class": "sku-name"})
+                # 商品名称处理删除空格
+                goods_name = sku_name.get_text().strip()
+                # 获取商品经营方式
+                img = sku_name.find("img")
+                if img:
+                    alt = img["alt"]
+                else:
+                    alt = "无"
+                product_details_dic["goods_name"] = goods_name
+                product_details_dic["alt"] = alt
+                # 获取商品的详细信息
+                good_parameter = soup.find("div", {"class": "p-parameter"})
+                # parameter_brand = good_parameter.find("ul", {"id": "parameter-brand"}, {"class": "p-parameter-list"})
+                # brand = parameter_brand.find("li")["title"]
+                if good_parameter:
+                    p_parameter_list = good_parameter.find("ul", {"class": "parameter2"})
+                    # print(p_parameter_list)
+                    li_parameter_list = p_parameter_list.find_all("li")
+                    # 把商品介绍的详情信息添加到product_details_info
+                    for li_parameter in li_parameter_list:
+                        li_split = str(li_parameter.get_text()).split("：")
+                        product_details_dic[li_split[0]] = li_split[-1]
+                    # 把商品的规格与包装信息添加到product_details_info
+                    ptable = soup.find("div", {"class": "Ptable"})
+                    if ptable:
+                        ptable_dl = ptable.find("dl")
+                        ptable_dt = ptable_dl.find_all("dt")
+                        ptable_dd = ptable_dl.find_all("dd")
+                        for i in range(len(ptable_dt)):
+                            product_details_dic[ptable_dt[i].get_text()] = ptable_dd[i].get_text()
+                break
+        except:
+            if tries < (max_try_num):
+                continue
+            else:
+                logging.error("Has tried %d times to access url %s, all failed!", max_try_num)
+                break
+
+    print(product_details_dic)
 
 
 # def write_to_csv(goods):
@@ -140,8 +188,13 @@ def get_details_info(url):
 
 def main():
     page_num = int(search())
-    for num in range(1, page_num + 1):
-        print(next_page(num))
+    for num in range(1, page_num+1):
+        for item in next_page(num):
+            threads = [threading.Thread(target=get_details_info, args=(item[info],)) for info in item.keys()]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
 
 if __name__ == '__main__':
