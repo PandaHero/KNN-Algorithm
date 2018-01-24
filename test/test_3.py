@@ -118,14 +118,14 @@ def get_details_info(url):
     :param url: 商品的url
     :return:
     '''
-    print(url)
+    # print(url)
     # 重复最大次数
     max_try_num = 10
     # 保存商品详情信息
     product_details_dic = {}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36"}
-    # 遍历，若连接失败，则进行下一次请求
+    # 遍历，若连接失败，则继续下一次相同请求
     for tries in range(max_try_num):
         try:
             req = requests.get(url, headers=headers)
@@ -187,6 +187,7 @@ def get_details_info(url):
 
 
 def main():
+    # 获取商品列表页页数
     page_num = int(search())
     for num in range(1, page_num+1):
         for item in next_page(num):
