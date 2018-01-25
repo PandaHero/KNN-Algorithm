@@ -1,5 +1,4 @@
 from numpy import *
-import operator
 
 
 # 训练样本数据

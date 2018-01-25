@@ -1,6 +1,5 @@
-import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 # 将文本转换成Numpy的array

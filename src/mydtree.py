@@ -48,7 +48,11 @@ def splitData(dataSet, axis, value):
 
 # 创建数据集
 def createDataSet():
-    dataSet = [[1, 1, "yes"], [1, 1, "yes"], [1, 0, "no"], [0, 1, "no"], [0, 1, "no"]]
+    dataSet = [[1, 1, "yes"],
+               [1, 2, "yes"],
+               [1, 0, "no"],
+               [0, 1, "no"],
+               [0, 2, "no"]]
     labels = ["no surfacing", "flippers"]
     return dataSet, labels
 
@@ -56,3 +60,4 @@ def createDataSet():
 if __name__ == '__main__':
     dataSet, labels = createDataSet()
     print(calcShannonEnt(dataSet))
+    print(splitData(dataSet, 0, 0))
